@@ -63,15 +63,28 @@ def _test_kogan(kogan_cfg: dict) -> dict:
 def _test_gmail(gmail_cfg: dict) -> dict:
     from adapters.gmail_adapter import GmailAdapter
 
-    token_file = server.BASE_DIR / gmail_cfg.get("token_file", "data/gmail_token.json")
-    if not token_file.exists():
-        return {"error": "Credentials saved but authorization not completed. Token file missing."}
+    auth_method = gmail_cfg.get("auth_method", "oauth")
 
-    adapter = GmailAdapter(
-        client_id=gmail_cfg["client_id"],
-        client_secret=gmail_cfg["client_secret"],
-        token_file=str(token_file),
-    )
+    if auth_method == "service_account":
+        sa_file = gmail_cfg.get("service_account_file", "")
+        if not sa_file or not Path(sa_file).exists():
+            return {"error": "Service account file not found: " + sa_file}
+        adapter = GmailAdapter(
+            auth_method="service_account",
+            service_account_file=sa_file,
+            delegated_user=gmail_cfg["delegated_user"],
+        )
+    else:
+        token_file = server.BASE_DIR / gmail_cfg.get("token_file", "data/gmail_token.json")
+        if not token_file.exists():
+            return {"error": "Credentials saved but authorization not completed. Token file missing."}
+        adapter = GmailAdapter(
+            auth_method="oauth",
+            client_id=gmail_cfg["client_id"],
+            client_secret=gmail_cfg["client_secret"],
+            token_file=str(token_file),
+        )
+
     messages = adapter.get_unread(max_results=1)
     return {"count": len(messages)}
 
@@ -106,8 +119,8 @@ def register(mcp):
                 "connected": "Connected and working.",
             },
             "gmail": {
-                "not_configured": "Not set up yet. You'll need Google OAuth credentials (client ID and secret).",
-                "configured": "Credentials saved. Browser authorization still needed.",
+                "not_configured": "Not set up yet. You'll need Google OAuth credentials (client ID and secret) or a service account key file.",
+                "configured": "Credentials saved. Browser authorization still needed (OAuth) or connection not verified (service account).",
                 "connected": "Connected and working.",
             },
         }
@@ -138,14 +151,25 @@ def register(mcp):
 
         # --- Gmail ---
         gmail_cfg = config.get("gmail", {})
-        if gmail_cfg.get("client_id") and gmail_cfg.get("client_secret"):
-            gmail_status = "configured"
-            try:
-                info = _test_gmail(gmail_cfg)
-                if "error" not in info:
-                    gmail_status = "connected"
-            except Exception as e:
-                logger.warning("Gmail connection check failed: %s", e)
+        auth_method = gmail_cfg.get("auth_method", "oauth")
+        if auth_method == "service_account":
+            if gmail_cfg.get("service_account_file") and gmail_cfg.get("delegated_user"):
+                gmail_status = "configured"
+                try:
+                    info = _test_gmail(gmail_cfg)
+                    if "error" not in info:
+                        gmail_status = "connected"
+                except Exception as e:
+                    logger.warning("Gmail connection check failed: %s", e)
+        else:
+            if gmail_cfg.get("client_id") and gmail_cfg.get("client_secret"):
+                gmail_status = "configured"
+                try:
+                    info = _test_gmail(gmail_cfg)
+                    if "error" not in info:
+                        gmail_status = "connected"
+                except Exception as e:
+                    logger.warning("Gmail connection check failed: %s", e)
 
         result = {
             "neto": {
@@ -162,7 +186,7 @@ def register(mcp):
             },
             "purchasing": {
                 "status": "ready",
-                "message": "Ready to use. Default limits: $200/transaction, $500/day, $1500/week, $4000/month.",
+                "message": "Ready to use. Default limits: 00/transaction, 00/day, 500/week, 000/month.",
             },
         }
 
@@ -178,7 +202,6 @@ def register(mcp):
         if not url.startswith("https://"):
             return json.dumps({"status": "error", "error": "URL must start with https://"})
         if ".neto.com.au" not in url and ".maropost.com" not in url:
-            # Warn but don't block — some stores use custom domains
             pass
 
         config = _read_config()
@@ -243,34 +266,97 @@ def register(mcp):
             })
 
     @mcp.tool
-    def setup_configure_gmail(client_id: str, client_secret: str) -> str:
-        """Save Gmail OAuth2 credentials to config. After saving, run setup_gmail_authorize to get the authorization URL.
+    def setup_configure_gmail(
+        auth_method: str = "oauth",
+        client_id: str = "",
+        client_secret: str = "",
+        service_account_file: str = "",
+        delegated_user: str = "",
+    ) -> str:
+        """Configure Gmail email integration. Two authentication methods are available:
 
-        These credentials come from a Google Cloud Console project. Go to console.cloud.google.com → APIs & Services → Credentials → Create OAuth 2.0 Client ID (type: Desktop App). Enable the Gmail API under APIs & Services → Library. Copy the client ID and client secret.
+        1. OAuth (for personal Gmail / @gmail.com accounts):
+           - Requires client_id and client_secret from Google Cloud Console
+           - One-time browser authorization needed after configuration
+           - Go to console.cloud.google.com → APIs & Services → Credentials → Create OAuth 2.0 Client ID (type: Desktop App). Enable the Gmail API. Copy client_id and client_secret.
+
+        2. Service Account (for Google Workspace / business email):
+           - Requires a service account JSON key file and the email address to access
+           - No browser authorization needed — works immediately
+           - Setup: Google Workspace Admin → Security → API Controls → Domain-wide Delegation
+           - Add the service account's client ID with scopes: gmail.readonly, gmail.compose, gmail.modify
         """
+        auth_method = auth_method.strip().lower()
+        if auth_method not in ("oauth", "service_account"):
+            return json.dumps({
+                "status": "error",
+                "error": "auth_method must be 'oauth' or 'service_account'",
+            })
+
         config = _read_config()
-        config["gmail"] = {
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "token_file": "data/gmail_token.json",
-        }
-        _write_config(config)
-        logger.info("Gmail OAuth credentials saved")
-        return json.dumps({
-            "status": "configured",
-            "message": (
-                "Gmail credentials saved. Run setup_gmail_authorize to get a URL to open in your browser. "
-                "After granting access, copy the authorization code and pass it to setup_gmail_complete_auth."
-            ),
-        })
+
+        if auth_method == "service_account":
+            if not service_account_file or not delegated_user:
+                return json.dumps({
+                    "status": "error",
+                    "error": "service_account_file and delegated_user are required for service_account auth",
+                })
+            sa_path = Path(service_account_file)
+            if not sa_path.exists():
+                return json.dumps({
+                    "status": "error",
+                    "error": f"Service account file not found: {service_account_file}",
+                })
+            config["gmail"] = {
+                "auth_method": "service_account",
+                "service_account_file": service_account_file,
+                "delegated_user": delegated_user,
+            }
+            _write_config(config)
+            logger.info("Gmail service account credentials saved for %s", delegated_user)
+            return json.dumps({
+                "status": "configured",
+                "message": (
+                    f"Gmail service account configured for {delegated_user}. "
+                    "No browser authorization needed. Run setup_test_connection to verify."
+                ),
+            })
+        else:
+            if not client_id or not client_secret:
+                return json.dumps({
+                    "status": "error",
+                    "error": "client_id and client_secret are required for oauth auth",
+                })
+            config["gmail"] = {
+                "auth_method": "oauth",
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "token_file": "data/gmail_token.json",
+            }
+            _write_config(config)
+            logger.info("Gmail OAuth credentials saved")
+            return json.dumps({
+                "status": "configured",
+                "message": (
+                    "Gmail credentials saved. Run setup_gmail_authorize to get a URL to open in your browser. "
+                    "After granting access, copy the authorization code and pass it to setup_gmail_complete_auth."
+                ),
+            })
 
     @mcp.tool
     def setup_gmail_authorize() -> str:
-        """Start Gmail authorization. Returns a URL the user must open in their browser.
+        """Start Gmail OAuth authorization. Returns a URL the user must open in their browser.
         After granting access, the browser will show an authorization code.
-        Copy that code and pass it to setup_gmail_complete_auth."""
+        Copy that code and pass it to setup_gmail_complete_auth.
+        Not needed for service account auth."""
         config = _read_config()
         gmail_cfg = config.get("gmail", {})
+
+        if gmail_cfg.get("auth_method") == "service_account":
+            return json.dumps({
+                "error": "Authorization not needed for service account auth. Service accounts use domain-wide delegation."
+            })
+
         if not gmail_cfg.get("client_id") or not gmail_cfg.get("client_secret"):
             return json.dumps({"error": "Gmail not configured yet. Run setup_configure_gmail first."})
 
@@ -291,10 +377,17 @@ def register(mcp):
 
     @mcp.tool
     def setup_gmail_complete_auth(auth_code: str) -> str:
-        """Complete Gmail authorization by exchanging the code from the browser for access tokens.
-        The auth_code is the code shown in the browser after granting access."""
+        """Complete Gmail OAuth authorization by exchanging the code from the browser for access tokens.
+        The auth_code is the code shown in the browser after granting access.
+        Not needed for service account auth."""
         config = _read_config()
         gmail_cfg = config.get("gmail", {})
+
+        if gmail_cfg.get("auth_method") == "service_account":
+            return json.dumps({
+                "error": "Authorization not needed for service account auth. Service accounts use domain-wide delegation."
+            })
+
         if not gmail_cfg.get("client_id") or not gmail_cfg.get("client_secret"):
             return json.dumps({"error": "Gmail not configured. Run setup_configure_gmail first."})
 
@@ -326,8 +419,6 @@ def register(mcp):
     ) -> str:
         """Configure purchasing spending limits and save them to both config.json and spending.db.
         Call with no arguments to see current limits."""
-        # If called with all defaults and config already has purchasing section, return current values
-        defaults = (200.0, 500.0, 1500.0, 4000.0, True)
         called_with_defaults = (
             per_transaction_limit == 200.0
             and daily_limit == 500.0
@@ -347,7 +438,6 @@ def register(mcp):
                 }
                 return json.dumps({"status": "ready", "current_limits": current_limits})
 
-        # Write DB first — if this fails, config.json stays unchanged
         db_path = server.BASE_DIR / "data" / "spending.db"
         db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(db_path)
@@ -355,10 +445,7 @@ def register(mcp):
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA foreign_keys=ON")
 
-            # Ensure the config row exists (handles first-run case)
-            conn.execute("""
-                INSERT OR IGNORE INTO spending_config (id) VALUES (1)
-            """)
+            conn.execute("INSERT OR IGNORE INTO spending_config (id) VALUES (1)")
 
             cursor = conn.execute("""
                 UPDATE spending_config SET
@@ -384,7 +471,6 @@ def register(mcp):
             raise
         conn.close()
 
-        # DB succeeded — now update config.json
         config = _read_config()
         config["purchasing"] = {
             "per_transaction_limit": per_transaction_limit,
@@ -444,8 +530,15 @@ def register(mcp):
 
         elif platform == "gmail":
             gmail_cfg = config.get("gmail", {})
-            if not (gmail_cfg.get("client_id") and gmail_cfg.get("client_secret")):
-                return json.dumps({"platform": "gmail", "status": "failed", "details": "Not configured."})
+            auth_method = gmail_cfg.get("auth_method", "oauth")
+
+            if auth_method == "service_account":
+                if not (gmail_cfg.get("service_account_file") and gmail_cfg.get("delegated_user")):
+                    return json.dumps({"platform": "gmail", "status": "failed", "details": "Not configured."})
+            else:
+                if not (gmail_cfg.get("client_id") and gmail_cfg.get("client_secret")):
+                    return json.dumps({"platform": "gmail", "status": "failed", "details": "Not configured."})
+
             try:
                 info = _test_gmail(gmail_cfg)
                 if "error" in info:

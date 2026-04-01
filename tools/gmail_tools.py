@@ -6,17 +6,27 @@ from adapters.gmail_adapter import GmailAdapter
 _gmail = None
 
 
-def _get_gmail():
+def _get_gmail() -> GmailAdapter:
     global _gmail
-    if _gmail is not None:
-        return _gmail
-    config = server.load_config()
-    gmail_cfg = config["gmail"]
-    _gmail = GmailAdapter(
-        client_id=gmail_cfg["client_id"],
-        client_secret=gmail_cfg["client_secret"],
-        token_file=gmail_cfg["token_file"],
-    )
+    if _gmail is None:
+        from server import load_config
+        config = load_config()
+        cfg = config.get("gmail", {})
+        auth_method = cfg.get("auth_method", "oauth")
+
+        if auth_method == "service_account":
+            _gmail = GmailAdapter(
+                auth_method="service_account",
+                service_account_file=cfg["service_account_file"],
+                delegated_user=cfg["delegated_user"],
+            )
+        else:
+            _gmail = GmailAdapter(
+                auth_method="oauth",
+                client_id=cfg.get("client_id"),
+                client_secret=cfg.get("client_secret"),
+                token_file=cfg.get("token_file", "data/gmail_token.json"),
+            )
     return _gmail
 
 

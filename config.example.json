@@ -11,12 +11,18 @@
         "environment": "uat"
     },
     "gmail": {
+        "auth_method": "oauth",
         "client_id": "YOUR_GOOGLE_CLIENT_ID",
         "client_secret": "YOUR_GOOGLE_CLIENT_SECRET",
         "token_file": "data/gmail_token.json"
     },
+    "gmail_service_account_example": {
+        "auth_method": "service_account",
+        "service_account_file": "credentials/service-account.json",
+        "delegated_user": "david@hisbusiness.com.au"
+    },
     "purchasing": {
         "require_approval": true,
-        "per_transaction_limit": 200.00
+        "per_transaction_limit": 200.0
     }
 }

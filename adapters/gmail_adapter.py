@@ -18,19 +18,44 @@ SCOPES = [
 
 
 class GmailAdapter:
-    def __init__(self, client_id: str, client_secret: str, token_file: str):
-        self.client_config = {
-            "installed": {
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": ["urn:ietf:wg:oauth:2.0:oob", "http://localhost"],
+    def __init__(self, auth_method: str = "oauth",
+                 # OAuth params
+                 client_id: str = None, client_secret: str = None, token_file: str = None,
+                 # Service account params
+                 service_account_file: str = None, delegated_user: str = None):
+        self.auth_method = auth_method
+        self._service = None
+
+        if auth_method == "service_account":
+            self.service_account_file = service_account_file
+            self.delegated_user = delegated_user
+        else:
+            self.client_config = {
+                "installed": {
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                    "redirect_uris": ["urn:ietf:wg:oauth:2.0:oob", "http://localhost"],
+                }
             }
-        }
-        self.token_file = Path(token_file)
+            self.token_file = Path(token_file) if token_file else None
 
     def _get_service(self):
+        if self._service:
+            return self._service
+
+        if self.auth_method == "service_account":
+            from google.oauth2 import service_account
+            creds = service_account.Credentials.from_service_account_file(
+                self.service_account_file,
+                scopes=SCOPES,
+                subject=self.delegated_user,
+            )
+            self._service = build("gmail", "v1", credentials=creds)
+            return self._service
+
+        # OAuth flow
         creds = None
 
         if self.token_file.exists():
@@ -53,9 +78,15 @@ class GmailAdapter:
         self.token_file.parent.mkdir(parents=True, exist_ok=True)
         self.token_file.write_text(creds.to_json())
 
-        return build("gmail", "v1", credentials=creds)
+        self._service = build("gmail", "v1", credentials=creds)
+        return self._service
 
     def authorize(self):
+        if self.auth_method == "service_account":
+            raise RuntimeError(
+                "authorize() is not needed for service account auth. "
+                "Service accounts use domain-wide delegation and do not require browser consent."
+            )
         flow = InstalledAppFlow.from_client_config(self.client_config, SCOPES)
         creds = flow.run_local_server(port=0)
         self.token_file.parent.mkdir(parents=True, exist_ok=True)
