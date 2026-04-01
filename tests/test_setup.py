@@ -237,3 +237,122 @@ def test_test_connection_gmail_no_token(tools):
     result = json.loads(tools["setup_test_connection"](platform="gmail"))
     assert result["status"] == "failed"
     assert "authorization not completed" in result["details"]
+
+
+
+# --- Service account Gmail configuration ---
+
+def test_configure_gmail_service_account_saves_config(tools, isolate_config):
+    # Create a fake service account file
+    sa_dir = isolate_config / "credentials"
+    sa_dir.mkdir()
+    sa_file = sa_dir / "service-account.json"
+    sa_file.write_text('{"type": "service_account"}')
+
+    result = json.loads(tools["setup_configure_gmail"](
+        auth_method="service_account",
+        service_account_file=str(sa_file),
+        delegated_user="david@hisbusiness.com.au",
+    ))
+    assert result["status"] == "configured"
+    assert "service account" in result["message"].lower()
+    assert "david@hisbusiness.com.au" in result["message"]
+
+    saved = _read_config()
+    assert saved["gmail"]["auth_method"] == "service_account"
+    assert saved["gmail"]["delegated_user"] == "david@hisbusiness.com.au"
+
+
+def test_configure_gmail_service_account_missing_file(tools):
+    result = json.loads(tools["setup_configure_gmail"](
+        auth_method="service_account",
+        service_account_file="/nonexistent/file.json",
+        delegated_user="david@hisbusiness.com.au",
+    ))
+    assert result["status"] == "error"
+    assert "not found" in result["error"].lower()
+
+
+def test_configure_gmail_service_account_missing_params(tools):
+    result = json.loads(tools["setup_configure_gmail"](
+        auth_method="service_account",
+    ))
+    assert result["status"] == "error"
+    assert "required" in result["error"].lower()
+
+
+def test_configure_gmail_invalid_auth_method(tools):
+    result = json.loads(tools["setup_configure_gmail"](
+        auth_method="magic",
+    ))
+    assert result["status"] == "error"
+    assert "auth_method" in result["error"]
+
+
+def test_gmail_authorize_rejects_service_account(tools):
+    _write_config({"gmail": {"auth_method": "service_account", "service_account_file": "/tmp/sa.json", "delegated_user": "a@b.com"}})
+    result = json.loads(tools["setup_gmail_authorize"]())
+    assert "error" in result
+    assert "not needed" in result["error"].lower()
+
+
+def test_gmail_complete_auth_rejects_service_account(tools):
+    _write_config({"gmail": {"auth_method": "service_account", "service_account_file": "/tmp/sa.json", "delegated_user": "a@b.com"}})
+    result = json.loads(tools["setup_gmail_complete_auth"](auth_code="fake"))
+    assert "error" in result
+    assert "not needed" in result["error"].lower()
+
+
+def test_get_status_service_account_configured(tools, isolate_config):
+    sa_dir = isolate_config / "credentials"
+    sa_dir.mkdir()
+    sa_file = sa_dir / "service-account.json"
+    sa_file.write_text('{"type": "service_account"}')
+
+    _write_config({
+        "gmail": {
+            "auth_method": "service_account",
+            "service_account_file": str(sa_file),
+            "delegated_user": "david@hisbusiness.com.au",
+        }
+    })
+    result = json.loads(tools["setup_get_status"]())
+    # Connection will fail (no real API), but status should be "configured" not "not_configured"
+    assert result["gmail"]["status"] in ("configured", "connected")
+
+
+def test_get_status_service_account_incomplete(tools):
+    _write_config({
+        "gmail": {
+            "auth_method": "service_account",
+            "service_account_file": "",
+        }
+    })
+    result = json.loads(tools["setup_get_status"]())
+    assert result["gmail"]["status"] == "not_configured"
+
+
+def test_test_connection_gmail_service_account_not_configured(tools):
+    _write_config({"gmail": {"auth_method": "service_account"}})
+    result = json.loads(tools["setup_test_connection"](platform="gmail"))
+    assert result["status"] == "failed"
+    assert "Not configured" in result["details"]
+
+
+def test_configure_gmail_oauth_requires_credentials(tools):
+    result = json.loads(tools["setup_configure_gmail"](
+        auth_method="oauth",
+        client_id="",
+        client_secret="",
+    ))
+    assert result["status"] == "error"
+    assert "required" in result["error"].lower()
+
+
+def test_purchasing_status_message_has_dollar_signs(tools):
+    result = json.loads(tools["setup_get_status"]())
+    msg = result["purchasing"]["message"]
+    assert "$200" in msg
+    assert "$500" in msg
+    assert "$1500" in msg
+    assert "$4000" in msg

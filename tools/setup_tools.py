@@ -67,12 +67,16 @@ def _test_gmail(gmail_cfg: dict) -> dict:
 
     if auth_method == "service_account":
         sa_file = gmail_cfg.get("service_account_file", "")
-        if not sa_file or not Path(sa_file).exists():
-            return {"error": "Service account file not found: " + sa_file}
+        delegated_user = gmail_cfg.get("delegated_user", "")
+        if not sa_file or not delegated_user:
+            return {"error": "Service account config incomplete. Both service_account_file and delegated_user are required."}
+        sa_path = server.BASE_DIR / sa_file if not sa_file.startswith("/") else Path(sa_file)
+        if not sa_path.exists():
+            return {"error": f"Service account file not found: {sa_path}"}
         adapter = GmailAdapter(
             auth_method="service_account",
-            service_account_file=sa_file,
-            delegated_user=gmail_cfg["delegated_user"],
+            service_account_file=str(sa_path),
+            delegated_user=delegated_user,
         )
     else:
         token_file = server.BASE_DIR / gmail_cfg.get("token_file", "data/gmail_token.json")
@@ -99,6 +103,15 @@ def _gmail_client_config(gmail_cfg: dict) -> dict:
             "redirect_uris": ["urn:ietf:wg:oauth:2.0:oob", "http://localhost"],
         }
     }
+
+
+def _invalidate_gmail_singleton():
+    """Clear the cached Gmail adapter so gmail tools pick up new config."""
+    try:
+        from tools.gmail_tools import reset_gmail
+        reset_gmail()
+    except ImportError:
+        pass
 
 
 def register(mcp):
@@ -186,7 +199,7 @@ def register(mcp):
             },
             "purchasing": {
                 "status": "ready",
-                "message": "Ready to use. Default limits: 00/transaction, 00/day, 500/week, 000/month.",
+                "message": "Ready to use. Default limits: $200/transaction, $500/day, $1500/week, $4000/month.",
             },
         }
 
@@ -301,7 +314,7 @@ def register(mcp):
                     "status": "error",
                     "error": "service_account_file and delegated_user are required for service_account auth",
                 })
-            sa_path = Path(service_account_file)
+            sa_path = server.BASE_DIR / service_account_file if not service_account_file.startswith("/") else Path(service_account_file)
             if not sa_path.exists():
                 return json.dumps({
                     "status": "error",
@@ -309,10 +322,11 @@ def register(mcp):
                 })
             config["gmail"] = {
                 "auth_method": "service_account",
-                "service_account_file": service_account_file,
+                "service_account_file": str(sa_path),
                 "delegated_user": delegated_user,
             }
             _write_config(config)
+            _invalidate_gmail_singleton()
             logger.info("Gmail service account credentials saved for %s", delegated_user)
             return json.dumps({
                 "status": "configured",
@@ -334,6 +348,7 @@ def register(mcp):
                 "token_file": "data/gmail_token.json",
             }
             _write_config(config)
+            _invalidate_gmail_singleton()
             logger.info("Gmail OAuth credentials saved")
             return json.dumps({
                 "status": "configured",

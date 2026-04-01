@@ -1,6 +1,5 @@
 import json
 
-import server
 from adapters.gmail_adapter import GmailAdapter
 
 _gmail = None
@@ -9,16 +8,24 @@ _gmail = None
 def _get_gmail() -> GmailAdapter:
     global _gmail
     if _gmail is None:
-        from server import load_config
+        from server import load_config, BASE_DIR
         config = load_config()
         cfg = config.get("gmail", {})
         auth_method = cfg.get("auth_method", "oauth")
 
         if auth_method == "service_account":
+            sa_file = cfg.get("service_account_file", "")
+            delegated_user = cfg.get("delegated_user", "")
+            if not sa_file or not delegated_user:
+                raise RuntimeError(
+                    "Gmail service account config incomplete. "
+                    "Both service_account_file and delegated_user are required."
+                )
+            sa_path = str(BASE_DIR / sa_file) if not sa_file.startswith("/") else sa_file
             _gmail = GmailAdapter(
                 auth_method="service_account",
-                service_account_file=cfg["service_account_file"],
-                delegated_user=cfg["delegated_user"],
+                service_account_file=sa_path,
+                delegated_user=delegated_user,
             )
         else:
             _gmail = GmailAdapter(
@@ -28,6 +35,12 @@ def _get_gmail() -> GmailAdapter:
                 token_file=cfg.get("token_file", "data/gmail_token.json"),
             )
     return _gmail
+
+
+def reset_gmail():
+    """Clear the cached Gmail adapter so the next call picks up new config."""
+    global _gmail
+    _gmail = None
 
 
 def register(mcp):

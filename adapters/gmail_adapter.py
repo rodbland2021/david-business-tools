@@ -47,12 +47,25 @@ class GmailAdapter:
 
         if self.auth_method == "service_account":
             from google.oauth2 import service_account
-            creds = service_account.Credentials.from_service_account_file(
-                self.service_account_file,
-                scopes=SCOPES,
-                subject=self.delegated_user,
-            )
-            self._service = build("gmail", "v1", credentials=creds)
+            try:
+                creds = service_account.Credentials.from_service_account_file(
+                    self.service_account_file,
+                    scopes=SCOPES,
+                    subject=self.delegated_user,
+                )
+            except (ValueError, FileNotFoundError) as e:
+                raise RuntimeError(
+                    f"Service account file error: {e}. "
+                    "Check that the file is a valid Google service account JSON key."
+                ) from e
+            try:
+                self._service = build("gmail", "v1", credentials=creds)
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to build Gmail service with service account: {e}. "
+                    "Verify domain-wide delegation is configured in Google Workspace Admin "
+                    "and the service account has Gmail API scopes."
+                ) from e
             return self._service
 
         # OAuth flow
