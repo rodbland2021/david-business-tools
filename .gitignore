@@ -1,0 +1,9 @@
+config.json
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/gmail_token.json
+__pycache__/
+*.pyc
+.env
+.venv/

@@ -1,0 +1,22 @@
+{
+    "store_platform": "neto",
+    "neto": {
+        "url": "https://your-store.neto.com.au",
+        "username": "api-user",
+        "api_key": "YOUR_NETO_API_KEY"
+    },
+    "kogan": {
+        "seller_id": "YOUR_SELLER_ID",
+        "seller_token": "YOUR_SELLER_TOKEN",
+        "environment": "uat"
+    },
+    "gmail": {
+        "client_id": "YOUR_GOOGLE_CLIENT_ID",
+        "client_secret": "YOUR_GOOGLE_CLIENT_SECRET",
+        "token_file": "data/gmail_token.json"
+    },
+    "purchasing": {
+        "require_approval": true,
+        "per_transaction_limit": 200.00
+    }
+}
