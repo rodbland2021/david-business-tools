@@ -141,10 +141,16 @@ class GmailAdapter:
 
         thread_id = None
         if in_reply_to:
-            original = self.get_message(in_reply_to)
-            thread_id = original["thread_id"]
-            msg["In-Reply-To"] = in_reply_to
-            msg["References"] = in_reply_to
+            orig = service.users().messages().get(
+                userId="me", id=in_reply_to, format="metadata",
+                metadataHeaders=["Message-ID"]
+            ).execute()
+            orig_headers = {h["name"]: h["value"] for h in orig.get("payload", {}).get("headers", [])}
+            rfc_message_id = orig_headers.get("Message-ID", "")
+            if rfc_message_id:
+                msg["In-Reply-To"] = rfc_message_id
+                msg["References"] = rfc_message_id
+            thread_id = orig.get("threadId")
 
         raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8")
         draft_body = {"message": {"raw": raw}}

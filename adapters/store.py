@@ -125,6 +125,8 @@ class StoreAdapter:
         brand=None,
         category=None,
         in_stock=None,
+        limit: int = 50,
+        offset: int = 0,
     ) -> list[dict]:
         clauses = []
         params = []
@@ -148,7 +150,8 @@ class StoreAdapter:
             clauses.append("stock = 0")
 
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-        sql = f"SELECT * FROM products {where} ORDER BY updated_at DESC"
+        sql = f"SELECT * FROM products {where} ORDER BY updated_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
 
         conn = self._get_conn()
         rows = conn.execute(sql, params).fetchall()

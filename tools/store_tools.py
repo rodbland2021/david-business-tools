@@ -74,6 +74,8 @@ def register(mcp):
         brand: str = "",
         category: str = "",
         in_stock: str = "",
+        limit: int = 50,
+        offset: int = 0,
     ) -> str:
         """List products from the local database with optional filters."""
         in_stock_bool = None
@@ -86,6 +88,8 @@ def register(mcp):
             brand=brand or None,
             category=category or None,
             in_stock=in_stock_bool,
+            limit=limit,
+            offset=offset,
         )
         return json.dumps(result, default=str)
 

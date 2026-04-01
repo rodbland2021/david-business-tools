@@ -11,7 +11,7 @@ def _get_conn(db_path) -> sqlite3.Connection:
     return conn
 
 
-def _check_limits(db_path, category) -> dict:
+def _check_limits(db_path, category, amount=None) -> dict:
     conn = _get_conn(db_path)
     try:
         cat = conn.execute(
@@ -58,7 +58,7 @@ def _check_limits(db_path, category) -> dict:
             and monthly_remaining > 0
         )
 
-        return {
+        result = {
             "category": category,
             "within_limits": within_limits,
             "per_transaction_limit": per_transaction_limit,
@@ -73,6 +73,24 @@ def _check_limits(db_path, category) -> dict:
             "monthly_remaining": monthly_remaining,
             "require_approval": bool(config["require_approval"]),
         }
+
+        if amount is not None:
+            would_exceed_transaction = amount > per_transaction_limit
+            would_exceed_daily = (today_spent + amount) > cat_daily_limit
+            would_exceed_weekly = (week_spent + amount) > config["weekly_limit"]
+            would_exceed_monthly = (month_spent + amount) > config["monthly_limit"]
+            result["would_exceed_transaction"] = would_exceed_transaction
+            result["would_exceed_daily"] = would_exceed_daily
+            result["would_exceed_weekly"] = would_exceed_weekly
+            result["would_exceed_monthly"] = would_exceed_monthly
+            result["can_purchase"] = not any([
+                would_exceed_transaction,
+                would_exceed_daily,
+                would_exceed_weekly,
+                would_exceed_monthly,
+            ])
+
+        return result
     finally:
         conn.close()
 
@@ -155,10 +173,10 @@ def register(mcp):
     import server
 
     @mcp.tool
-    def purchasing_check_limits(category: str) -> str:
-        """Check remaining spending budget for a category. Categories: office_supplies, food_delivery, groceries, general."""
+    def purchasing_check_limits(category: str, amount: float = None) -> str:
+        """Check remaining spending budget for a category. Optionally pass amount to check if a specific purchase would be allowed. Categories: office_supplies, food_delivery, groceries, general."""
         db_path = server.BASE_DIR / "data" / "spending.db"
-        result = _check_limits(str(db_path), category)
+        result = _check_limits(str(db_path), category, amount=amount)
         return json.dumps(result)
 
     @mcp.tool
