@@ -1,12 +1,19 @@
 import json
 import logging
 import sqlite3
+from pathlib import Path
 
 import server
 
 logger = logging.getLogger(__name__)
 
 CONFIG_PATH = server.BASE_DIR / "config.json"
+
+GMAIL_SCOPES = [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.compose",
+    "https://www.googleapis.com/auth/gmail.modify",
+]
 
 
 def _read_config() -> dict:
@@ -69,55 +76,104 @@ def _test_gmail(gmail_cfg: dict) -> dict:
     return {"count": len(messages)}
 
 
+def _gmail_client_config(gmail_cfg: dict) -> dict:
+    return {
+        "installed": {
+            "client_id": gmail_cfg["client_id"],
+            "client_secret": gmail_cfg["client_secret"],
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": ["urn:ietf:wg:oauth:2.0:oob", "http://localhost"],
+        }
+    }
+
+
 def register(mcp):
     @mcp.tool
     def setup_get_status() -> str:
-        """Check which platforms are configured and working. Returns JSON with status for each platform."""
+        """Check which platforms are configured and working. Returns JSON with status and human-friendly message for each platform."""
         config = _read_config()
 
-        result = {
-            "neto": "not_configured",
-            "kogan": "not_configured",
-            "gmail": "not_configured",
-            "purchasing": "ready",
+        _STATUS_MESSAGES = {
+            "neto": {
+                "not_configured": "Not set up yet. You'll need your Neto store URL, API username, and API key.",
+                "configured": "Credentials saved but connection not verified.",
+                "connected": "Connected and working.",
+            },
+            "kogan": {
+                "not_configured": "Not set up yet. You'll need your Kogan Seller ID and Seller Token.",
+                "configured": "Credentials saved but connection not verified.",
+                "connected": "Connected and working.",
+            },
+            "gmail": {
+                "not_configured": "Not set up yet. You'll need Google OAuth credentials (client ID and secret).",
+                "configured": "Credentials saved. Browser authorization still needed.",
+                "connected": "Connected and working.",
+            },
         }
+
+        neto_status = "not_configured"
+        kogan_status = "not_configured"
+        gmail_status = "not_configured"
 
         # --- Neto ---
         neto_cfg = config.get("neto", {})
         if neto_cfg.get("url") and neto_cfg.get("username") and neto_cfg.get("api_key"):
-            result["neto"] = "configured"
+            neto_status = "configured"
             try:
                 _test_neto(neto_cfg)
-                result["neto"] = "connected"
+                neto_status = "connected"
             except Exception as e:
                 logger.warning("Neto connection check failed: %s", e)
 
         # --- Kogan ---
         kogan_cfg = config.get("kogan", {})
         if kogan_cfg.get("seller_id") and kogan_cfg.get("seller_token"):
-            result["kogan"] = "configured"
+            kogan_status = "configured"
             try:
                 _test_kogan(kogan_cfg)
-                result["kogan"] = "connected"
+                kogan_status = "connected"
             except Exception as e:
                 logger.warning("Kogan connection check failed: %s", e)
 
         # --- Gmail ---
         gmail_cfg = config.get("gmail", {})
         if gmail_cfg.get("client_id") and gmail_cfg.get("client_secret"):
-            result["gmail"] = "configured"
+            gmail_status = "configured"
             try:
                 info = _test_gmail(gmail_cfg)
                 if "error" not in info:
-                    result["gmail"] = "connected"
+                    gmail_status = "connected"
             except Exception as e:
                 logger.warning("Gmail connection check failed: %s", e)
+
+        result = {
+            "neto": {
+                "status": neto_status,
+                "message": _STATUS_MESSAGES["neto"][neto_status],
+            },
+            "kogan": {
+                "status": kogan_status,
+                "message": _STATUS_MESSAGES["kogan"][kogan_status],
+            },
+            "gmail": {
+                "status": gmail_status,
+                "message": _STATUS_MESSAGES["gmail"][gmail_status],
+            },
+            "purchasing": {
+                "status": "ready",
+                "message": "Ready to use. Default limits: $200/transaction, $500/day, $1500/week, $4000/month.",
+            },
+        }
 
         return json.dumps(result)
 
     @mcp.tool
     def setup_configure_neto(url: str, username: str, api_key: str) -> str:
-        """Configure Neto credentials and test the connection. url must be an https:// Neto store URL."""
+        """Configure Neto credentials and test the connection. url must be an https:// Neto store URL.
+
+        Where to find these credentials: Log into your Neto control panel → Settings & Tools → All Settings & Tools → API → Add New Key. Set permissions to read/write for Products, Orders, and RMA. Copy the generated key. The URL is your store URL (e.g., https://yourstore.neto.com.au). The username is the API user you created.
+        """
         url = url.strip()
         if not url.startswith("https://"):
             return json.dumps({"status": "error", "error": "URL must start with https://"})
@@ -153,7 +209,10 @@ def register(mcp):
         seller_token: str,
         environment: str = "production",
     ) -> str:
-        """Configure Kogan marketplace credentials and test the connection. environment: 'production' or 'uat'."""
+        """Configure Kogan marketplace credentials and test the connection. environment: 'production' or 'uat'.
+
+        Where to find these credentials: Log into Kogan Seller Portal → Settings → API Access. Copy your Seller ID and Seller Token. Use environment='uat' for testing, 'production' for live.
+        """
         environment = environment.strip().lower()
         if environment not in ("production", "uat"):
             return json.dumps({
@@ -185,7 +244,10 @@ def register(mcp):
 
     @mcp.tool
     def setup_configure_gmail(client_id: str, client_secret: str) -> str:
-        """Save Gmail OAuth2 credentials to config. The user will need to complete browser-based authorization separately."""
+        """Save Gmail OAuth2 credentials to config. After saving, run setup_gmail_authorize to get the authorization URL.
+
+        These credentials come from a Google Cloud Console project. Go to console.cloud.google.com → APIs & Services → Credentials → Create OAuth 2.0 Client ID (type: Desktop App). Enable the Gmail API under APIs & Services → Library. Copy the client ID and client secret.
+        """
         config = _read_config()
         config["gmail"] = {
             "client_id": client_id,
@@ -197,15 +259,61 @@ def register(mcp):
         return json.dumps({
             "status": "configured",
             "message": (
-                "Gmail credentials saved. To complete authorization, run this command "
-                "on David's machine (it will open a browser window for Google consent):\n\n"
-                "  python3 -c \""
-                "import json, sys; sys.path.insert(0, '.'); "
-                "from adapters.gmail_adapter import GmailAdapter; "
-                "cfg = json.load(open('config.json'))['gmail']; "
-                "GmailAdapter(cfg['client_id'], cfg['client_secret'], cfg['token_file']).authorize(); "
-                "print('Gmail authorized successfully')\""
+                "Gmail credentials saved. Run setup_gmail_authorize to get a URL to open in your browser. "
+                "After granting access, copy the authorization code and pass it to setup_gmail_complete_auth."
             ),
+        })
+
+    @mcp.tool
+    def setup_gmail_authorize() -> str:
+        """Start Gmail authorization. Returns a URL the user must open in their browser.
+        After granting access, the browser will show an authorization code.
+        Copy that code and pass it to setup_gmail_complete_auth."""
+        config = _read_config()
+        gmail_cfg = config.get("gmail", {})
+        if not gmail_cfg.get("client_id") or not gmail_cfg.get("client_secret"):
+            return json.dumps({"error": "Gmail not configured yet. Run setup_configure_gmail first."})
+
+        from google_auth_oauthlib.flow import InstalledAppFlow
+
+        client_config = _gmail_client_config(gmail_cfg)
+        flow = InstalledAppFlow.from_client_config(client_config, GMAIL_SCOPES)
+        flow.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
+        auth_url, _ = flow.authorization_url(prompt="consent", access_type="offline")
+        return json.dumps({
+            "status": "awaiting_authorization",
+            "auth_url": auth_url,
+            "message": (
+                "Open this URL in a browser, sign in with the Gmail account, grant access, "
+                "then copy the authorization code and pass it to setup_gmail_complete_auth."
+            ),
+        })
+
+    @mcp.tool
+    def setup_gmail_complete_auth(auth_code: str) -> str:
+        """Complete Gmail authorization by exchanging the code from the browser for access tokens.
+        The auth_code is the code shown in the browser after granting access."""
+        config = _read_config()
+        gmail_cfg = config.get("gmail", {})
+        if not gmail_cfg.get("client_id") or not gmail_cfg.get("client_secret"):
+            return json.dumps({"error": "Gmail not configured. Run setup_configure_gmail first."})
+
+        from google_auth_oauthlib.flow import InstalledAppFlow
+
+        client_config = _gmail_client_config(gmail_cfg)
+        flow = InstalledAppFlow.from_client_config(client_config, GMAIL_SCOPES)
+        flow.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
+        flow.fetch_token(code=auth_code.strip())
+
+        token_file = server.BASE_DIR / gmail_cfg.get("token_file", "data/gmail_token.json")
+        token_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(token_file, "w") as f:
+            f.write(flow.credentials.to_json())
+
+        logger.info("Gmail token saved to %s", token_file)
+        return json.dumps({
+            "status": "connected",
+            "message": "Gmail authorized successfully. Token saved. Email tools are now ready to use.",
         })
 
     @mcp.tool
@@ -216,7 +324,29 @@ def register(mcp):
         monthly_limit: float = 4000.0,
         require_approval: bool = True,
     ) -> str:
-        """Configure purchasing spending limits and save them to both config.json and spending.db."""
+        """Configure purchasing spending limits and save them to both config.json and spending.db.
+        Call with no arguments to see current limits."""
+        # If called with all defaults and config already has purchasing section, return current values
+        defaults = (200.0, 500.0, 1500.0, 4000.0, True)
+        called_with_defaults = (
+            per_transaction_limit == 200.0
+            and daily_limit == 500.0
+            and weekly_limit == 1500.0
+            and monthly_limit == 4000.0
+            and require_approval is True
+        )
+        if called_with_defaults:
+            existing = _read_config().get("purchasing", {})
+            if existing:
+                current_limits = {
+                    "per_transaction": existing.get("per_transaction_limit", 200.0),
+                    "daily": existing.get("daily_limit", 500.0),
+                    "weekly": existing.get("weekly_limit", 1500.0),
+                    "monthly": existing.get("monthly_limit", 4000.0),
+                    "require_approval": existing.get("require_approval", True),
+                }
+                return json.dumps({"status": "ready", "current_limits": current_limits})
+
         # Write DB first — if this fails, config.json stays unchanged
         db_path = server.BASE_DIR / "data" / "spending.db"
         db_path.parent.mkdir(parents=True, exist_ok=True)

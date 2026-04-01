@@ -78,17 +78,20 @@ def test_write_then_read_roundtrip(isolate_config):
 
 def test_get_status_no_config(tools):
     result = json.loads(tools["setup_get_status"]())
-    assert result["neto"] == "not_configured"
-    assert result["kogan"] == "not_configured"
-    assert result["gmail"] == "not_configured"
-    assert result["purchasing"] == "ready"
+    assert result["neto"]["status"] == "not_configured"
+    assert result["kogan"]["status"] == "not_configured"
+    assert result["gmail"]["status"] == "not_configured"
+    assert result["purchasing"]["status"] == "ready"
+    # All entries have human-friendly messages
+    assert "message" in result["neto"]
+    assert "message" in result["purchasing"]
 
 
 def test_get_status_with_partial_config(tools):
     _write_config({"neto": {"url": "https://x.neto.com.au", "username": "u", "api_key": "k"}})
     result = json.loads(tools["setup_get_status"]())
     # Connection will fail (no real API), but status should be "configured" not "not_configured"
-    assert result["neto"] in ("configured", "connected")
+    assert result["neto"]["status"] in ("configured", "connected")
 
 
 # --- setup_configure_neto ---
@@ -139,7 +142,7 @@ def test_configure_gmail_saves_config(tools):
         client_id="cid.apps.googleusercontent.com", client_secret="secret"
     ))
     assert result["status"] == "configured"
-    assert "python3" in result["message"]
+    assert "setup_gmail_authorize" in result["message"]
 
     saved = _read_config()
     assert saved["gmail"]["client_id"] == "cid.apps.googleusercontent.com"
@@ -190,6 +193,29 @@ def test_configure_purchasing_no_db_table(tools, isolate_config):
 
     with pytest.raises(Exception):
         tools["setup_configure_purchasing"]()
+
+
+# --- setup_configure_purchasing (view current limits) ---
+
+def test_configure_purchasing_defaults_returns_current_when_set(tools, isolate_config):
+    _init_spending_db(isolate_config)
+    # First call with custom limits saves them
+    tools["setup_configure_purchasing"](per_transaction_limit=100.0, daily_limit=250.0,
+                                        weekly_limit=800.0, monthly_limit=2000.0, require_approval=False)
+    # Second call with all defaults should return the saved values, not write new ones
+    result = json.loads(tools["setup_configure_purchasing"]())
+    assert result["status"] == "ready"
+    assert "current_limits" in result
+    assert result["current_limits"]["per_transaction"] == 100.0
+    assert result["current_limits"]["daily"] == 250.0
+
+
+# --- setup_gmail_authorize / setup_gmail_complete_auth ---
+
+def test_gmail_authorize_requires_config(tools):
+    result = json.loads(tools["setup_gmail_authorize"]())
+    assert "error" in result
+    assert "setup_configure_gmail" in result["error"]
 
 
 # --- setup_test_connection ---
