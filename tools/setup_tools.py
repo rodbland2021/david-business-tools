@@ -100,7 +100,7 @@ def _gmail_client_config(gmail_cfg: dict) -> dict:
             "client_secret": gmail_cfg["client_secret"],
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
-            "redirect_uris": ["urn:ietf:wg:oauth:2.0:oob", "http://localhost"],
+            "redirect_uris": ["http://localhost"],
         }
     }
 
@@ -361,7 +361,9 @@ def register(mcp):
     @mcp.tool
     def setup_gmail_authorize() -> str:
         """Start Gmail OAuth authorization. Returns a URL the user must open in their browser.
-        After granting access, the browser will show an authorization code.
+        After granting access, the browser will redirect to http://localhost:8765 — the page
+        will show a connection error (nothing is listening there), but the authorization code
+        is visible in the browser address bar after 'code=' and before any '&'.
         Copy that code and pass it to setup_gmail_complete_auth.
         Not needed for service account auth."""
         config = _read_config()
@@ -379,21 +381,25 @@ def register(mcp):
 
         client_config = _gmail_client_config(gmail_cfg)
         flow = InstalledAppFlow.from_client_config(client_config, GMAIL_SCOPES)
-        flow.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
-        auth_url, _ = flow.authorization_url(prompt="consent", access_type="offline")
+        flow.redirect_uri = "http://localhost:8765"
+        auth_url, state = flow.authorization_url(prompt="consent", access_type="offline")
+        config["_gmail_auth_state"] = state
+        _write_config(config)
         return json.dumps({
             "status": "awaiting_authorization",
             "auth_url": auth_url,
             "message": (
-                "Open this URL in a browser, sign in with the Gmail account, grant access, "
-                "then copy the authorization code and pass it to setup_gmail_complete_auth."
+                "Open this URL in a browser and sign in with your Gmail account. After granting access, "
+                "the browser will redirect to http://localhost:8765 which will show a connection error — "
+                "that is normal. Copy the 'code' value from the browser address bar (the part after 'code=' "
+                "and before any '&') and pass it to setup_gmail_complete_auth."
             ),
         })
 
     @mcp.tool
     def setup_gmail_complete_auth(auth_code: str) -> str:
         """Complete Gmail OAuth authorization by exchanging the code from the browser for access tokens.
-        The auth_code is the code shown in the browser after granting access.
+        The auth_code is the 'code' value from the browser address bar after granting access.
         Not needed for service account auth."""
         config = _read_config()
         gmail_cfg = config.get("gmail", {})
@@ -410,13 +416,16 @@ def register(mcp):
 
         client_config = _gmail_client_config(gmail_cfg)
         flow = InstalledAppFlow.from_client_config(client_config, GMAIL_SCOPES)
-        flow.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
+        flow.redirect_uri = "http://localhost:8765"
         flow.fetch_token(code=auth_code.strip())
 
         token_file = server.BASE_DIR / gmail_cfg.get("token_file", "data/gmail_token.json")
         token_file.parent.mkdir(parents=True, exist_ok=True)
         with open(token_file, "w") as f:
             f.write(flow.credentials.to_json())
+
+        config.pop("_gmail_auth_state", None)
+        _write_config(config)
 
         logger.info("Gmail token saved to %s", token_file)
         return json.dumps({
