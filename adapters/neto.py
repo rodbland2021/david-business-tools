@@ -5,6 +5,8 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+RETRYABLE_STATUS_CODES = (429, 502, 503, 504)
+
 
 class NetoAdapter:
     def __init__(self, url: str, username: str, api_key: str):
@@ -27,11 +29,16 @@ class NetoAdapter:
                 response = requests.post(
                     self.endpoint, json=body, headers=headers, timeout=30
                 )
-                if response.status_code in (429, 502, 503, 504):
+                if response.status_code in RETRYABLE_STATUS_CODES:
                     if attempt < retries - 1:
+                        if response.status_code == 429:
+                            log_label = "rate limited"
+                        else:
+                            log_label = "server error"
                         logger.warning(
-                            "Neto API %s returned %d, retrying in %ds (attempt %d/%d)",
+                            "Neto API %s %s (%d), retrying in %ds (attempt %d/%d)",
                             action,
+                            log_label,
                             response.status_code,
                             delay,
                             attempt + 1,
@@ -41,13 +48,20 @@ class NetoAdapter:
                         delay *= 2
                         continue
                     response.raise_for_status()
+                # For all other error status codes (4xx, 5xx not in retryable list),
+                # raise immediately without retrying.
                 response.raise_for_status()
                 return response.json()
+            except requests.HTTPError:
+                # HTTPError means we got a response with a bad status code.
+                # Non-retryable errors (e.g. 404, 401, 403, 400) must fail immediately.
+                raise
             except requests.RequestException as e:
+                # Network-level errors (connection refused, timeout, etc.) are retried.
                 last_exception = e
                 if attempt < retries - 1:
                     logger.warning(
-                        "Neto API %s request error: %s, retrying in %ds",
+                        "Neto API %s network error: %s, retrying in %ds",
                         action,
                         e,
                         delay,

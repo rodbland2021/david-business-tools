@@ -4,23 +4,27 @@ from adapters.gmail_adapter import GmailAdapter
 
 _gmail = None
 
+_NOT_CONFIGURED_ERROR = json.dumps({
+    "error": "Gmail is not configured yet. Ask your assistant to run setup_configure_gmail to connect your email."
+})
 
-def _get_gmail() -> GmailAdapter:
+
+def _get_gmail():
     global _gmail
     if _gmail is None:
         from server import load_config, BASE_DIR
         config = load_config()
         cfg = config.get("gmail", {})
-        auth_method = cfg.get("auth_method", "service_account")
+        auth_method = cfg.get("auth_method")
+
+        if not auth_method:
+            return None
 
         if auth_method == "service_account":
             sa_file = cfg.get("service_account_file", "")
             delegated_user = cfg.get("delegated_user", "")
             if not sa_file or not delegated_user:
-                raise RuntimeError(
-                    "Gmail service account config incomplete. "
-                    "Both service_account_file and delegated_user are required."
-                )
+                return None
             sa_path = str(BASE_DIR / sa_file) if not sa_file.startswith("/") else sa_file
             _gmail = GmailAdapter(
                 auth_method="service_account",
@@ -46,22 +50,28 @@ def register(mcp):
     @mcp.tool
     def gmail_get_unread(label: str = "", max_results: int = 20) -> str:
         """Fetch unread emails. Optional label filter."""
+        gmail = _get_gmail()
+        if gmail is None:
+            return _NOT_CONFIGURED_ERROR
         try:
-            result = _get_gmail().get_unread(
+            result = gmail.get_unread(
                 label=label or None,
                 max_results=max_results,
             )
             return json.dumps(result, default=str)
-        except RuntimeError as e:
+        except Exception as e:
             return json.dumps({"error": str(e)})
 
     @mcp.tool
     def gmail_get_message(message_id: str) -> str:
         """Read a specific email by message ID. Returns full body text."""
+        gmail = _get_gmail()
+        if gmail is None:
+            return _NOT_CONFIGURED_ERROR
         try:
-            result = _get_gmail().get_message(message_id)
+            result = gmail.get_message(message_id)
             return json.dumps(result, default=str)
-        except RuntimeError as e:
+        except Exception as e:
             return json.dumps({"error": str(e)})
 
     @mcp.tool
@@ -72,22 +82,28 @@ def register(mcp):
         in_reply_to: str = "",
     ) -> str:
         """Create an email draft. Set in_reply_to to a message ID to thread the reply."""
+        gmail = _get_gmail()
+        if gmail is None:
+            return _NOT_CONFIGURED_ERROR
         try:
-            draft_id = _get_gmail().create_draft(
+            draft_id = gmail.create_draft(
                 to=to,
                 subject=subject,
                 body=body,
                 in_reply_to=in_reply_to or None,
             )
             return json.dumps({"draft_id": draft_id})
-        except RuntimeError as e:
+        except Exception as e:
             return json.dumps({"error": str(e)})
 
     @mcp.tool
     def gmail_send_draft(draft_id: str) -> str:
         """Send a previously created draft."""
+        gmail = _get_gmail()
+        if gmail is None:
+            return _NOT_CONFIGURED_ERROR
         try:
-            result = _get_gmail().send_draft(draft_id)
+            result = gmail.send_draft(draft_id)
             return json.dumps(result, default=str)
-        except RuntimeError as e:
+        except Exception as e:
             return json.dumps({"error": str(e)})
