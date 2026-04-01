@@ -141,6 +141,7 @@ def main():
     from tools.gmail_tools import register as register_gmail
     from tools.purchasing_tools import register as register_purchasing
     from tools.specs_tools import register as register_specs
+    from tools.setup_tools import register as register_setup
 
     register_store(mcp)
     register_neto(mcp)
@@ -148,6 +149,7 @@ def main():
     register_gmail(mcp)
     register_purchasing(mcp)
     register_specs(mcp)
+    register_setup(mcp)
 
     mcp.run()
 
