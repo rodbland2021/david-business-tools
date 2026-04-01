@@ -1,5 +1,4 @@
 import json
-import os
 import sqlite3
 from pathlib import Path
 
@@ -63,83 +62,71 @@ def init_products_db():
 
 def init_spending_db():
     conn = get_spending_db()
-
-    conn.execute("""
+    conn.executescript("""
         CREATE TABLE IF NOT EXISTS spending_config (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL,
+            id INTEGER PRIMARY KEY,
+            per_transaction_limit REAL NOT NULL DEFAULT 200.00,
+            daily_limit REAL NOT NULL DEFAULT 500.00,
+            weekly_limit REAL NOT NULL DEFAULT 1500.00,
+            monthly_limit REAL NOT NULL DEFAULT 4000.00,
+            require_approval INTEGER NOT NULL DEFAULT 1,
+            auto_approve_below REAL DEFAULT NULL,
             updated_at TEXT DEFAULT (datetime('now'))
-        )
-    """)
+        );
 
-    conn.execute("""
+        INSERT OR IGNORE INTO spending_config (id) VALUES (1);
+
         CREATE TABLE IF NOT EXISTS spending_categories (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT UNIQUE NOT NULL,
-            per_transaction_limit REAL NOT NULL,
-            monthly_budget REAL,
-            active INTEGER DEFAULT 1,
-            created_at TEXT DEFAULT (datetime('now'))
-        )
-    """)
+            per_transaction_limit REAL,
+            daily_limit REAL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            notes TEXT
+        );
 
-    conn.execute("""
+        INSERT OR IGNORE INTO spending_categories (name, per_transaction_limit, daily_limit, notes) VALUES
+            ('office_supplies', 200.00, 300.00, 'OfficeWorks'),
+            ('food_delivery', 80.00, 120.00, 'Uber Eats, DoorDash, Menulog'),
+            ('groceries', 200.00, 200.00, 'Woolworths, Coles online'),
+            ('general', 100.00, 200.00, 'Catch-all for unlisted platforms');
+
         CREATE TABLE IF NOT EXISTS purchase_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT DEFAULT (datetime('now')),
+            platform TEXT NOT NULL,
             category TEXT NOT NULL,
-            vendor TEXT NOT NULL,
             description TEXT NOT NULL,
             amount REAL NOT NULL,
-            currency TEXT DEFAULT 'AUD',
-            status TEXT DEFAULT 'pending',
+            status TEXT NOT NULL DEFAULT 'pending',
             approved_by TEXT,
+            approved_at TEXT,
+            completed_at TEXT,
+            order_reference TEXT,
             receipt_url TEXT,
             notes TEXT,
-            created_at TEXT DEFAULT (datetime('now')),
-            updated_at TEXT DEFAULT (datetime('now'))
-        )
-    """)
+            FOREIGN KEY (category) REFERENCES spending_categories(name)
+        );
 
-    conn.execute("""
         CREATE TABLE IF NOT EXISTS blocked_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            pattern TEXT NOT NULL,
+            keyword TEXT NOT NULL,
             reason TEXT,
             created_at TEXT DEFAULT (datetime('now'))
-        )
-    """)
+        );
 
-    # Indexes
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_purchase_log_category ON purchase_log (category)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_purchase_log_status ON purchase_log (status)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_purchase_log_created_at ON purchase_log (created_at)")
+        CREATE INDEX IF NOT EXISTS idx_purchase_log_date ON purchase_log(created_at);
+        CREATE INDEX IF NOT EXISTS idx_purchase_log_status ON purchase_log(status);
 
-    # Spending totals view
-    conn.execute("""
         CREATE VIEW IF NOT EXISTS spending_totals AS
         SELECT
             category,
-            SUM(CASE WHEN status = 'approved' THEN amount ELSE 0 END) AS approved_total,
-            SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END) AS pending_total,
-            COUNT(*) AS transaction_count
+            SUM(CASE WHEN created_at >= date('now') AND status IN ('approved','completed') THEN amount ELSE 0 END) as today_spent,
+            SUM(CASE WHEN created_at >= date('now', '-7 days') AND status IN ('approved','completed') THEN amount ELSE 0 END) as week_spent,
+            SUM(CASE WHEN created_at >= date('now', 'start of month') AND status IN ('approved','completed') THEN amount ELSE 0 END) as month_spent
         FROM purchase_log
-        WHERE strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now')
-        GROUP BY category
+        GROUP BY category;
     """)
-
-    # Default categories
-    default_categories = [
-        ('office_supplies', 200.0),
-        ('food_delivery', 80.0),
-        ('groceries', 200.0),
-        ('general', 100.0),
-    ]
-    for name, limit in default_categories:
-        conn.execute(
-            "INSERT OR IGNORE INTO spending_categories (name, per_transaction_limit) VALUES (?, ?)",
-            (name, limit)
-        )
-
     conn.commit()
     conn.close()
 

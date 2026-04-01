@@ -155,12 +155,20 @@ class StoreAdapter:
         conn.close()
         return [dict(r) for r in rows]
 
+    _UPDATABLE_COLUMNS = frozenset({
+        "name", "brand", "model", "description", "specs", "price",
+        "cost_price", "stock", "condition", "category", "images",
+        "kogan_sku", "kogan_synced_at",
+    })
+
     def update_product(self, sku, **fields) -> dict:
         now = self._now()
         set_parts = ["updated_at=?"]
         params = [now]
 
         for key, value in fields.items():
+            if key not in self._UPDATABLE_COLUMNS:
+                raise ValueError(f"Cannot update column: {key}")
             if key in ("specs", "images") and isinstance(value, (dict, list)):
                 value = json.dumps(value)
             set_parts.append(f"{key}=?")
@@ -194,21 +202,27 @@ class StoreAdapter:
 
     def update_stock(self, sku, quantity, action="set") -> dict:
         now = self._now()
+        conn = self._get_conn()
 
         if action == "set":
-            sql = "UPDATE products SET stock=?, updated_at=? WHERE sku=?"
-            params = (quantity, now, sku)
+            conn.execute(
+                "UPDATE products SET stock=?, updated_at=? WHERE sku=?",
+                (quantity, now, sku),
+            )
         elif action == "increment":
-            sql = "UPDATE products SET stock=stock+?, updated_at=? WHERE sku=?"
-            params = (quantity, now, sku)
+            conn.execute(
+                "UPDATE products SET stock=stock+?, updated_at=? WHERE sku=?",
+                (quantity, now, sku),
+            )
         elif action == "decrement":
-            sql = "UPDATE products SET stock=stock-?, updated_at=? WHERE sku=?"
-            params = (quantity, now, sku)
+            conn.execute(
+                "UPDATE products SET stock=MAX(0, stock-?), updated_at=? WHERE sku=?",
+                (quantity, now, sku),
+            )
         else:
+            conn.close()
             raise ValueError(f"Unknown action: {action}")
 
-        conn = self._get_conn()
-        conn.execute(sql, params)
         conn.commit()
         conn.close()
 
