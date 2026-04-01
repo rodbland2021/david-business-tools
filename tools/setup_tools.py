@@ -280,7 +280,7 @@ def register(mcp):
 
     @mcp.tool
     def setup_configure_gmail(
-        auth_method: str = "oauth",
+        auth_method: str = "service_account",
         client_id: str = "",
         client_secret: str = "",
         service_account_file: str = "",
@@ -288,22 +288,22 @@ def register(mcp):
     ) -> str:
         """Configure Gmail email integration. Two authentication methods are available:
 
-        1. OAuth (for personal Gmail / @gmail.com accounts):
-           - Requires client_id and client_secret from Google Cloud Console
-           - One-time browser authorization needed after configuration
-           - Go to console.cloud.google.com → APIs & Services → Credentials → Create OAuth 2.0 Client ID (type: Desktop App). Enable the Gmail API. Copy client_id and client_secret.
-
-        2. Service Account (for Google Workspace / business email):
+        1. Service Account (for Google Workspace / business email — preferred):
            - Requires a service account JSON key file and the email address to access
            - No browser authorization needed — works immediately
            - Setup: Google Workspace Admin → Security → API Controls → Domain-wide Delegation
            - Add the service account's client ID with scopes: gmail.readonly, gmail.compose, gmail.modify
+
+        2. OAuth (for personal Gmail / @gmail.com accounts):
+           - Requires client_id and client_secret from Google Cloud Console
+           - One-time browser authorization needed after configuration
+           - Go to console.cloud.google.com → APIs & Services → Credentials → Create OAuth 2.0 Client ID (type: Desktop App). Enable the Gmail API. Copy client_id and client_secret.
         """
         auth_method = auth_method.strip().lower()
         if auth_method not in ("oauth", "service_account"):
             return json.dumps({
                 "status": "error",
-                "error": "auth_method must be 'oauth' or 'service_account'",
+                "error": "auth_method must be 'service_account' or 'oauth'",
             })
 
         config = _read_config()

@@ -11,7 +11,7 @@ def _get_gmail() -> GmailAdapter:
         from server import load_config, BASE_DIR
         config = load_config()
         cfg = config.get("gmail", {})
-        auth_method = cfg.get("auth_method", "oauth")
+        auth_method = cfg.get("auth_method", "service_account")
 
         if auth_method == "service_account":
             sa_file = cfg.get("service_account_file", "")
@@ -38,7 +38,6 @@ def _get_gmail() -> GmailAdapter:
 
 
 def reset_gmail():
-    """Clear the cached Gmail adapter so the next call picks up new config."""
     global _gmail
     _gmail = None
 

@@ -18,11 +18,11 @@ SCOPES = [
 
 
 class GmailAdapter:
-    def __init__(self, auth_method: str = "oauth",
-                 # OAuth params
-                 client_id: str = None, client_secret: str = None, token_file: str = None,
+    def __init__(self, auth_method: str = "service_account",
                  # Service account params
-                 service_account_file: str = None, delegated_user: str = None):
+                 service_account_file: str = None, delegated_user: str = None,
+                 # OAuth params
+                 client_id: str = None, client_secret: str = None, token_file: str = None):
         self.auth_method = auth_method
         self._service = None
 
@@ -40,6 +40,10 @@ class GmailAdapter:
                 }
             }
             self.token_file = Path(token_file) if token_file else None
+
+    # ------------------------------------------------------------------ #
+    # Internal: Gmail API service
+    # ------------------------------------------------------------------ #
 
     def _get_service(self):
         if self._service:
@@ -94,19 +98,11 @@ class GmailAdapter:
         self._service = build("gmail", "v1", credentials=creds)
         return self._service
 
-    def authorize(self):
-        if self.auth_method == "service_account":
-            raise RuntimeError(
-                "authorize() is not needed for service account auth. "
-                "Service accounts use domain-wide delegation and do not require browser consent."
-            )
-        flow = InstalledAppFlow.from_client_config(self.client_config, SCOPES)
-        creds = flow.run_local_server(port=0)
-        self.token_file.parent.mkdir(parents=True, exist_ok=True)
-        self.token_file.write_text(creds.to_json())
-        return True
+    # ------------------------------------------------------------------ #
+    # Internal: Gmail API implementations
+    # ------------------------------------------------------------------ #
 
-    def get_unread(self, label=None, max_results=20) -> list:
+    def _api_get_unread(self, label=None, max_results=20) -> list:
         service = self._get_service()
         query = "is:unread"
         if label:
@@ -140,7 +136,7 @@ class GmailAdapter:
             })
         return results
 
-    def get_message(self, message_id) -> dict:
+    def _api_get_message(self, message_id) -> dict:
         service = self._get_service()
         detail = (
             service.users()
@@ -176,7 +172,7 @@ class GmailAdapter:
             "body": body,
         }
 
-    def create_draft(self, to, subject, body, in_reply_to=None) -> str:
+    def _api_create_draft(self, to, subject, body, in_reply_to=None) -> str:
         service = self._get_service()
 
         msg = MIMEText(body)
@@ -204,7 +200,7 @@ class GmailAdapter:
         draft = service.users().drafts().create(userId="me", body=draft_body).execute()
         return draft["id"]
 
-    def send_draft(self, draft_id) -> dict:
+    def _api_send_draft(self, draft_id) -> dict:
         service = self._get_service()
         result = service.users().drafts().send(userId="me", body={"id": draft_id}).execute()
         return {
@@ -212,10 +208,41 @@ class GmailAdapter:
             "thread_id": result["threadId"],
         }
 
-    def mark_read(self, message_id):
+    def _api_mark_read(self, message_id):
         service = self._get_service()
         service.users().messages().modify(
             userId="me",
             id=message_id,
             body={"removeLabelIds": ["UNREAD"]},
         ).execute()
+
+    # ------------------------------------------------------------------ #
+    # Public API
+    # ------------------------------------------------------------------ #
+
+    def authorize(self):
+        if self.auth_method == "service_account":
+            raise RuntimeError(
+                "authorize() is not needed for service account auth. "
+                "Service accounts use domain-wide delegation and do not require browser consent."
+            )
+        flow = InstalledAppFlow.from_client_config(self.client_config, SCOPES)
+        creds = flow.run_local_server(port=0)
+        self.token_file.parent.mkdir(parents=True, exist_ok=True)
+        self.token_file.write_text(creds.to_json())
+        return True
+
+    def get_unread(self, label=None, max_results=20) -> list:
+        return self._api_get_unread(label, max_results)
+
+    def get_message(self, message_id) -> dict:
+        return self._api_get_message(message_id)
+
+    def create_draft(self, to, subject, body, in_reply_to=None) -> str:
+        return self._api_create_draft(to, subject, body, in_reply_to)
+
+    def send_draft(self, draft_id) -> dict:
+        return self._api_send_draft(draft_id)
+
+    def mark_read(self, message_id):
+        return self._api_mark_read(message_id)

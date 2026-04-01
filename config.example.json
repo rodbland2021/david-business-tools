@@ -11,15 +11,15 @@
         "environment": "uat"
     },
     "gmail": {
+        "auth_method": "service_account",
+        "service_account_file": "credentials/service-account.json",
+        "delegated_user": "your.email@yourdomain.com"
+    },
+    "gmail_oauth_example": {
         "auth_method": "oauth",
         "client_id": "YOUR_GOOGLE_CLIENT_ID",
         "client_secret": "YOUR_GOOGLE_CLIENT_SECRET",
         "token_file": "data/gmail_token.json"
-    },
-    "gmail_service_account_example": {
-        "auth_method": "service_account",
-        "service_account_file": "credentials/service-account.json",
-        "delegated_user": "david@hisbusiness.com.au"
     },
     "purchasing": {
         "require_approval": true,

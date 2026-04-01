@@ -139,7 +139,7 @@ def test_configure_kogan_saves_config(tools):
 
 def test_configure_gmail_saves_config(tools):
     result = json.loads(tools["setup_configure_gmail"](
-        client_id="cid.apps.googleusercontent.com", client_secret="secret"
+        auth_method="oauth", client_id="cid.apps.googleusercontent.com", client_secret="secret"
     ))
     assert result["status"] == "configured"
     assert "setup_gmail_authorize" in result["message"]
