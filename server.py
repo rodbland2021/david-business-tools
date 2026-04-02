@@ -143,6 +143,7 @@ def main():
     from tools.specs_tools import register as register_specs
     from tools.setup_tools import register as register_setup
     from tools.facebook_tools import register as register_facebook
+    from tools.verification_tools import register as register_verification
 
     register_store(mcp)
     register_neto(mcp)
@@ -152,6 +153,7 @@ def main():
     register_specs(mcp)
     register_setup(mcp)
     register_facebook(mcp)
+    register_verification(mcp)
 
     mcp.run()
 
