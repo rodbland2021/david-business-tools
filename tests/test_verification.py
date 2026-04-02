@@ -2,8 +2,6 @@ import base64
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 
 def _mock_image_response(content=b"\x89PNG\r\n", content_type="image/png", status_code=200):
     mock = MagicMock()
