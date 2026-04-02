@@ -14,23 +14,25 @@ Add MCP tools that let Simon (OpenClaw agent) audit Neto product listings by fet
 
 ### Tools
 
-**`neto_verify_listing(sku: str) -> str`**
+**`neto_verify_listing(sku: str, max_images: int = 0) -> str`**
 
-Single-product audit. Fetches one product from Neto by SKU, downloads all associated images, returns a JSON bundle with product metadata and base64-encoded images.
+Single-product audit. Fetches one product from Neto by SKU, downloads all associated images, returns a JSON bundle with product metadata and base64-encoded images. `max_images=0` means all images; any positive value caps the number downloaded.
 
-**`neto_verify_listings(limit: int = 20, page: int = 0) -> str`**
+**`neto_verify_listings(limit: int = 20, page: int = 0, max_images: int = 0) -> str`**
 
-Batch audit. Fetches multiple products from Neto, downloads all images for each, returns an array of product bundles. Supports pagination.
+Batch audit. Fetches multiple products from Neto, downloads all images for each, returns an array of product bundles. Supports pagination. `max_images` caps images per product to control response size.
 
 ### Internal Helper
 
-**`_download_images(image_urls: list) -> list[dict]`**
+**`_download_images(image_urls: list, max_images: int = 0) -> list[dict]`**
 
+- If `max_images > 0`, truncates the URL list to that count before downloading
 - Downloads each image URL with `requests.get(url, timeout=15)`
 - Base64-encodes the response body
 - Detects content type from response `Content-Type` header (fallback: `image/jpeg`)
 - On failure: logs warning, returns `{"url": "...", "error": "download failed: <reason>"}` instead of skipping
 - No retry logic (CDN URLs, not rate-limited APIs)
+- Logs total download time at INFO level for performance visibility
 
 ### Module Pattern
 
@@ -39,6 +41,12 @@ Follows existing tool module conventions:
 - Lazy initialiser: `_get_neto()` reads config via `server.load_config()`
 - `register(mcp)` function decorates tools with `@mcp.tool`
 - All returns are `json.dumps(..., default=str)`
+
+## Error Handling
+
+- **SKU not found:** return `{"error": "SKU not found in Neto", "sku": "<sku>"}`
+- **Neto API failure:** return `{"error": "Neto API error: <message>"}`
+- **Product has no images:** include in results with `"image_count": 0, "images": []`
 
 ## Response Format
 
@@ -68,9 +76,12 @@ Follows existing tool module conventions:
   "page": 0,
   "limit": 20,
   "product_count": 15,
+  "total_images": 47,
+  "products_with_images": 12,
+  "products_without_images": 3,
   "products": [
     { "sku": "...", "name": "...", "image_count": 3, "images": [...] },
-    { "sku": "...", "name": "...", "image_count": 1, "images": [...] }
+    { "sku": "...", "name": "...", "image_count": 0, "images": [] }
   ]
 }
 ```
@@ -86,9 +97,18 @@ Follows existing tool module conventions:
 - No config changes
 - No new dependencies
 
+## Testing
+
+- `tests/test_verification.py` — unit tests covering:
+  - Single SKU: valid product with images, product with no images, SKU not found
+  - Batch: multiple products, pagination, `max_images` cap
+  - Image download: successful download, failed download (error in response), timeout
+  - Mock Neto API responses and image HTTP requests
+
 ## Files Changed
 
 | File | Change |
 |------|--------|
 | `tools/verification_tools.py` | New file — two MCP tools + image download helper |
 | `server.py` | Add import and registration call |
+| `tests/test_verification.py` | New file — unit tests |
