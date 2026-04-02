@@ -142,6 +142,7 @@ def main():
     from tools.purchasing_tools import register as register_purchasing
     from tools.specs_tools import register as register_specs
     from tools.setup_tools import register as register_setup
+    from tools.facebook_tools import register as register_facebook
 
     register_store(mcp)
     register_neto(mcp)
@@ -150,6 +151,7 @@ def main():
     register_purchasing(mcp)
     register_specs(mcp)
     register_setup(mcp)
+    register_facebook(mcp)
 
     mcp.run()
 

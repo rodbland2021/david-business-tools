@@ -21,6 +21,10 @@
         "client_secret": "YOUR_GOOGLE_CLIENT_SECRET",
         "token_file": "data/gmail_token.json"
     },
+    "facebook": {
+        "page_id": "YOUR_PAGE_ID",
+        "page_access_token": "YOUR_PAGE_ACCESS_TOKEN"
+    },
     "purchasing": {
         "require_approval": true,
         "per_transaction_limit": 200.0
