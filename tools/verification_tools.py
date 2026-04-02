@@ -60,5 +60,48 @@ def _download_images(image_urls: list, max_images: int = 0) -> list[dict]:
     return results
 
 
+def _extract_image_urls(item: dict) -> list:
+    images = item.get("Images", {})
+    if isinstance(images, dict):
+        img_list = images.get("Image", [])
+        if isinstance(img_list, str):
+            return [img_list]
+        if isinstance(img_list, list):
+            return img_list
+    return []
+
+
+def _build_product_bundle(item: dict, max_images: int = 0) -> dict:
+    image_urls = _extract_image_urls(item)
+    downloaded = _download_images(image_urls, max_images=max_images)
+    return {
+        "sku": item.get("SKU", ""),
+        "name": item.get("Name", ""),
+        "description": item.get("Description", ""),
+        "brand": item.get("Brand", ""),
+        "model": item.get("Model", ""),
+        "price": item.get("DefaultPrice", ""),
+        "image_count": len(downloaded),
+        "images": downloaded,
+    }
+
+
+def _neto_verify_listing(sku: str, max_images: int = 0) -> str:
+    try:
+        result = _get_neto().get_item(sku)
+    except Exception as e:
+        return json.dumps({"error": f"Neto API error: {e}"})
+
+    items = result.get("Item", [])
+    if not items:
+        return json.dumps({"error": "SKU not found in Neto", "sku": sku})
+
+    bundle = _build_product_bundle(items[0], max_images=max_images)
+    return json.dumps(bundle, default=str)
+
+
 def register(mcp):
-    pass  # Tools added in subsequent tasks
+    @mcp.tool
+    def neto_verify_listing(sku: str, max_images: int = 0) -> str:
+        """Fetch a Neto product by SKU with all images as base64 for visual verification. max_images=0 means all images; positive value caps the count."""
+        return _neto_verify_listing(sku, max_images=max_images)

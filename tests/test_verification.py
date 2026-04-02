@@ -69,3 +69,74 @@ class TestDownloadImages:
         with patch("requests.get", return_value=mock_resp):
             result = _download_images(["https://cdn.example.com/img.jpg"])
         assert result[0]["content_type"] == "image/jpeg"
+
+
+def _mock_neto_response(json_data, status_code=200):
+    mock = MagicMock()
+    mock.status_code = status_code
+    mock.json.return_value = json_data
+    mock.raise_for_status.return_value = None
+    return mock
+
+
+class TestNetoVerifyListing:
+    @patch("tools.verification_tools._get_neto")
+    @patch("requests.get")
+    def test_returns_product_with_images(self, mock_get, mock_get_neto):
+        from tools.verification_tools import _neto_verify_listing
+        mock_neto = MagicMock()
+        mock_neto.get_item.return_value = {
+            "Item": [{"SKU": "ML-T480", "Name": "Lenovo ThinkPad T480", "Description": "14-inch laptop", "Brand": "Lenovo", "Model": "T480", "DefaultPrice": "549.00", "Images": {"Image": ["https://cdn.example.com/img1.jpg"]}}]
+        }
+        mock_get_neto.return_value = mock_neto
+        img_bytes = b"\xff\xd8\xff\xe0fake jpeg"
+        mock_get.return_value = _mock_image_response(content=img_bytes, content_type="image/jpeg")
+        result = json.loads(_neto_verify_listing("ML-T480"))
+        assert result["sku"] == "ML-T480"
+        assert result["name"] == "Lenovo ThinkPad T480"
+        assert result["image_count"] == 1
+        assert result["images"][0]["content_type"] == "image/jpeg"
+        assert result["images"][0]["base64"] == base64.b64encode(img_bytes).decode("ascii")
+
+    @patch("tools.verification_tools._get_neto")
+    def test_sku_not_found(self, mock_get_neto):
+        from tools.verification_tools import _neto_verify_listing
+        mock_neto = MagicMock()
+        mock_neto.get_item.return_value = {"Item": []}
+        mock_get_neto.return_value = mock_neto
+        result = json.loads(_neto_verify_listing("NONEXISTENT"))
+        assert result["error"] == "SKU not found in Neto"
+        assert result["sku"] == "NONEXISTENT"
+
+    @patch("tools.verification_tools._get_neto")
+    def test_product_with_no_images(self, mock_get_neto):
+        from tools.verification_tools import _neto_verify_listing
+        mock_neto = MagicMock()
+        mock_neto.get_item.return_value = {"Item": [{"SKU": "ML-BARE", "Name": "No Image Product", "Description": "", "Brand": "", "Model": "", "DefaultPrice": "10.00", "Images": {}}]}
+        mock_get_neto.return_value = mock_neto
+        result = json.loads(_neto_verify_listing("ML-BARE"))
+        assert result["sku"] == "ML-BARE"
+        assert result["image_count"] == 0
+        assert result["images"] == []
+
+    @patch("tools.verification_tools._get_neto")
+    def test_neto_api_error(self, mock_get_neto):
+        from tools.verification_tools import _neto_verify_listing
+        mock_neto = MagicMock()
+        mock_neto.get_item.side_effect = Exception("API timeout")
+        mock_get_neto.return_value = mock_neto
+        result = json.loads(_neto_verify_listing("ML-T480"))
+        assert "error" in result
+        assert "Neto API error" in result["error"]
+
+    @patch("tools.verification_tools._get_neto")
+    @patch("requests.get")
+    def test_max_images_limits_downloads(self, mock_get, mock_get_neto):
+        from tools.verification_tools import _neto_verify_listing
+        mock_neto = MagicMock()
+        mock_neto.get_item.return_value = {"Item": [{"SKU": "ML-MANY", "Name": "Many Images", "Description": "", "Brand": "", "Model": "", "DefaultPrice": "99.00", "Images": {"Image": ["https://cdn.example.com/1.jpg", "https://cdn.example.com/2.jpg", "https://cdn.example.com/3.jpg"]}}]}
+        mock_get_neto.return_value = mock_neto
+        mock_get.return_value = _mock_image_response()
+        result = json.loads(_neto_verify_listing("ML-MANY", max_images=1))
+        assert result["image_count"] == 1
+        assert len(result["images"]) == 1
