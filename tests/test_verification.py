@@ -25,6 +25,7 @@ class TestDownloadImages:
             result = _download_images(["https://cdn.example.com/img1.png"])
         assert len(result) == 1
         assert result[0]["url"] == "https://cdn.example.com/img1.png"
+        assert result[0]["status"] == "ok"
         assert result[0]["base64"] == base64.b64encode(img_bytes).decode("ascii")
         assert result[0]["content_type"] == "image/png"
 
@@ -34,6 +35,7 @@ class TestDownloadImages:
         with patch("requests.get", side_effect=RequestException("Connection refused")):
             result = _download_images(["https://cdn.example.com/broken.jpg"])
         assert len(result) == 1
+        assert result[0]["status"] == "error"
         assert "error" in result[0]
         assert result[0]["url"] == "https://cdn.example.com/broken.jpg"
 
@@ -67,6 +69,45 @@ class TestDownloadImages:
         with patch("requests.get", return_value=mock_resp):
             result = _download_images(["https://cdn.example.com/img.jpg"])
         assert result[0]["content_type"] == "image/jpeg"
+
+    def test_status_field_on_success(self):
+        from tools.verification_tools import _download_images
+        mock_resp = _mock_image_response()
+        with patch("requests.get", return_value=mock_resp):
+            result = _download_images(["https://cdn.example.com/img.jpg"])
+        assert result[0]["status"] == "ok"
+
+    def test_status_field_on_failure(self):
+        from tools.verification_tools import _download_images
+        from requests import RequestException
+        with patch("requests.get", side_effect=RequestException("timeout")):
+            result = _download_images(["https://cdn.example.com/img.jpg"])
+        assert result[0]["status"] == "error"
+
+
+class TestExtractImageUrls:
+    def test_single_string_image(self):
+        from tools.verification_tools import _extract_image_urls
+        item = {"Images": {"Image": "https://cdn.example.com/single.jpg"}}
+        result = _extract_image_urls(item)
+        assert result == ["https://cdn.example.com/single.jpg"]
+
+    def test_list_of_images(self):
+        from tools.verification_tools import _extract_image_urls
+        item = {"Images": {"Image": ["https://cdn.example.com/1.jpg", "https://cdn.example.com/2.jpg"]}}
+        result = _extract_image_urls(item)
+        assert len(result) == 2
+
+    def test_empty_images(self):
+        from tools.verification_tools import _extract_image_urls
+        item = {"Images": {}}
+        result = _extract_image_urls(item)
+        assert result == []
+
+    def test_missing_images_key(self):
+        from tools.verification_tools import _extract_image_urls
+        result = _extract_image_urls({})
+        assert result == []
 
 
 def _mock_neto_response(json_data, status_code=200):

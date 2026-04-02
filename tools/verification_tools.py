@@ -44,6 +44,7 @@ def _download_images(image_urls: list, max_images: int = 0) -> list[dict]:
                 content_type = "image/jpeg"
             results.append({
                 "url": url,
+                "status": "ok",
                 "base64": encoded,
                 "content_type": content_type,
             })
@@ -51,6 +52,7 @@ def _download_images(image_urls: list, max_images: int = 0) -> list[dict]:
             logger.warning("Failed to download image %s: %s", url, e)
             results.append({
                 "url": url,
+                "status": "error",
                 "error": f"download failed: {e}",
             })
 
@@ -86,7 +88,7 @@ def _build_product_bundle(item: dict, max_images: int = 0) -> dict:
     }
 
 
-def _neto_verify_listing(sku: str, max_images: int = 0) -> str:
+def _neto_verify_listing(sku: str, max_images: int = 10) -> str:
     try:
         result = _get_neto().get_item(sku)
     except Exception as e:
@@ -100,7 +102,7 @@ def _neto_verify_listing(sku: str, max_images: int = 0) -> str:
     return json.dumps(bundle, default=str)
 
 
-def _neto_verify_listings(limit: int = 20, page: int = 0, max_images: int = 0) -> str:
+def _neto_verify_listings(limit: int = 20, page: int = 0, max_images: int = 10) -> str:
     try:
         result = _get_neto().get_items(
             limit=limit,
@@ -138,11 +140,11 @@ def _neto_verify_listings(limit: int = 20, page: int = 0, max_images: int = 0) -
 
 def register(mcp):
     @mcp.tool
-    def neto_verify_listing(sku: str, max_images: int = 0) -> str:
-        """Fetch a Neto product by SKU with all images as base64 for visual verification. max_images=0 means all images; positive value caps the count."""
+    def neto_verify_listing(sku: str, max_images: int = 10) -> str:
+        """Fetch a Neto product by SKU with images as base64 for visual audit. Review images against title/description to flag mismatches. max_images caps downloads per product (default 10, 0 = all)."""
         return _neto_verify_listing(sku, max_images=max_images)
 
     @mcp.tool
-    def neto_verify_listings(limit: int = 20, page: int = 0, max_images: int = 0) -> str:
-        """Fetch Neto products in batch with all images as base64 for visual verification. Returns summary counts and per-product image bundles."""
+    def neto_verify_listings(limit: int = 20, page: int = 0, max_images: int = 10) -> str:
+        """Fetch Neto products with images for visual audit. Review each product's images against its title/description to flag mismatches. Use page to paginate. max_images caps per product (default 10, 0 = all)."""
         return _neto_verify_listings(limit=limit, page=page, max_images=max_images)
