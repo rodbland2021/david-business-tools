@@ -81,6 +81,50 @@ def register(mcp):
         return json.dumps(result, default=str)
 
     @mcp.tool
+    def neto_get_active_listings(
+        page: int = 0,
+        limit: int = 50,
+    ) -> str:
+        """List Neto products that are active and have stock > 0. Use page to paginate."""
+        result = _get_neto().get_items(
+            is_active="True",
+            min_stock=1,
+            limit=limit,
+            page=page,
+            output_fields=[
+                "SKU",
+                "Name",
+                "Brand",
+                "Model",
+                "DefaultPrice",
+                "WarehouseQuantity",
+                "AvailableSellQuantity",
+                "Images",
+                "DateUpdated",
+            ],
+        )
+        return json.dumps(result, default=str)
+
+    @mcp.tool
+    def neto_get_listing_url(sku: str) -> str:
+        """Get the public storefront URL for a Neto product by SKU. Returns the live listing URL on the Manly Laptops website."""
+        config = server.load_config()
+        base_url = config["neto"]["url"].rstrip("/")
+        url = f"{base_url}/{sku}"
+        return json.dumps({"sku": sku, "url": url})
+
+    @mcp.tool
+    def neto_get_listing_urls(skus_json: str) -> str:
+        """Get public storefront URLs for multiple Neto products. skus_json: JSON array of SKU strings. Returns a list of {sku, url} objects."""
+        try:
+            skus = json.loads(skus_json)
+        except Exception:
+            return json.dumps({"error": "skus_json must be a valid JSON array of strings"})
+        config = server.load_config()
+        base_url = config["neto"]["url"].rstrip("/")
+        return json.dumps([{"sku": sku, "url": f"{base_url}/{sku}"} for sku in skus])
+
+    @mcp.tool
     def neto_get_rmas(
         status: str = "",
         date_from: str = "",

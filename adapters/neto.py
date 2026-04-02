@@ -132,6 +132,7 @@ class NetoAdapter:
     def get_items(
         self,
         is_active=None,
+        min_stock=None,
         limit=50,
         page=0,
         date_updated_from=None,
@@ -147,10 +148,16 @@ class NetoAdapter:
                 "DefaultPrice",
                 "CostPrice",
                 "AvailableSellQuantity",
+                "WarehouseQuantity",
                 "Images",
                 "Categories",
                 "DateUpdated",
             ]
+        # Ensure stock fields are always present when filtering by stock
+        if min_stock is not None:
+            for field in ("AvailableSellQuantity", "WarehouseQuantity"):
+                if field not in output_fields:
+                    output_fields = list(output_fields) + [field]
         filter_params = {
             "Limit": limit,
             "Page": page,
@@ -162,7 +169,20 @@ class NetoAdapter:
             filter_params["IsActive"] = is_active
         if date_updated_from is not None:
             filter_params["DateUpdatedFrom"] = date_updated_from
-        return self._request("GetItem", {"Filter": filter_params})
+        result = self._request("GetItem", {"Filter": filter_params})
+        # Client-side stock filter (Neto API has no native min-stock filter)
+        if min_stock is not None:
+            items = result.get("Item") or []
+            def _qty(item):
+                wq = item.get("WarehouseQuantity")
+                if isinstance(wq, dict):
+                    return int(wq.get("Quantity") or 0)
+                if wq is not None:
+                    return int(wq)
+                return int(item.get("AvailableSellQuantity") or 0)
+            filtered = [item for item in items if _qty(item) >= min_stock]
+            result["Item"] = filtered
+        return result
 
     def update_item(self, sku, **fields) -> dict:
         item = {"SKU": sku}
