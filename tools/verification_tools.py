@@ -100,8 +100,49 @@ def _neto_verify_listing(sku: str, max_images: int = 0) -> str:
     return json.dumps(bundle, default=str)
 
 
+def _neto_verify_listings(limit: int = 20, page: int = 0, max_images: int = 0) -> str:
+    try:
+        result = _get_neto().get_items(
+            limit=limit,
+            page=page,
+            output_fields=["SKU", "Name", "Description", "Brand", "Model", "DefaultPrice", "Images"],
+        )
+    except Exception as e:
+        return json.dumps({"error": f"Neto API error: {e}"})
+
+    items = result.get("Item", [])
+    products = []
+    total_images = 0
+    with_images = 0
+    without_images = 0
+
+    for item in items:
+        bundle = _build_product_bundle(item, max_images=max_images)
+        products.append(bundle)
+        total_images += bundle["image_count"]
+        if bundle["image_count"] > 0:
+            with_images += 1
+        else:
+            without_images += 1
+
+    return json.dumps({
+        "page": page,
+        "limit": limit,
+        "product_count": len(products),
+        "total_images": total_images,
+        "products_with_images": with_images,
+        "products_without_images": without_images,
+        "products": products,
+    }, default=str)
+
+
 def register(mcp):
     @mcp.tool
     def neto_verify_listing(sku: str, max_images: int = 0) -> str:
         """Fetch a Neto product by SKU with all images as base64 for visual verification. max_images=0 means all images; positive value caps the count."""
         return _neto_verify_listing(sku, max_images=max_images)
+
+    @mcp.tool
+    def neto_verify_listings(limit: int = 20, page: int = 0, max_images: int = 0) -> str:
+        """Fetch Neto products in batch with all images as base64 for visual verification. Returns summary counts and per-product image bundles."""
+        return _neto_verify_listings(limit=limit, page=page, max_images=max_images)
