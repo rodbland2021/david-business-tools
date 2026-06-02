@@ -1,0 +1,70 @@
+# Standard CI workflow for Rod's VPS Python apps.
+# Hard gates (block merge - catch REAL bugs):
+#   1. ruff F821     - undefined Python names (matches the pre-commit hook)
+#   2. py_compile    - syntax validation on all .py files
+#   3. JS validation - node --check on inline <script> tags in static/*.html
+# Soft (informational): pytest tests/ - may need VPS-only config/services.
+# Do NOT expand ruff rules beyond F821. Do NOT chase style issues.
+
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install ruff
+        run: pip install ruff
+      - name: Ruff lint (undefined names only)
+        run: ruff check --select F821 .
+      - name: Syntax check Python files
+        run: |
+          find . -name '*.py' -not -path './.venv/*' -not -path './venv/*' -not -path './.git/*' | while read f; do
+            python -m py_compile "$f" 2>&1 || { echo "Syntax error in $f"; exit 1; }
+          done
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt 2>/dev/null || true
+          pip install -r requirements-test.txt 2>/dev/null || true
+      - name: Stub VPS-only shared libraries
+        run: |
+          mkdir -p /tmp/vps-stubs
+          echo '"""CI stub for sqlite_safe - VPS-only library not in this repo."""' > /tmp/vps-stubs/sqlite_safe.py
+          echo "PYTHONPATH=/tmp/vps-stubs:${PYTHONPATH:-}" >> "$GITHUB_ENV"
+      - name: Run tests (informational)
+        if: hashFiles('tests/**') != ''
+        continue-on-error: true
+        run: python -m pytest tests/ -v -W ignore::pytest.PytestUnraisableExceptionWarning
+      - name: JS validation (inline scripts)
+        run: |
+          ERRORS=0
+          for f in static/*.html; do
+            [ -f "$f" ] || continue
+            python3 -c "
+          import re
+          html = open('$f').read()
+          scripts = re.findall(r'<script(?![^>]*src=)[^>]*>(.*?)</script>', html, re.DOTALL)
+          for i, s in enumerate(scripts):
+              if s.strip():
+                  open(f'/tmp/check_{i}.js','w').write(s)
+          " || true
+            for js in /tmp/check_*.js; do
+              [ -f "$js" ] || continue
+              node --check "$js" 2>&1 || { echo "JS error in $f"; ERRORS=$((ERRORS+1)); }
+              rm -f "$js"
+            done
+          done
+          [ "$ERRORS" -eq 0 ] || exit 1
