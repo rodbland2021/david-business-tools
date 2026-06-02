@@ -1,8 +1,10 @@
 # Standard CI workflow for Rod's VPS Python apps.
 # Hard gates (block merge - catch REAL bugs):
-#   1. ruff F821     - undefined Python names (matches the pre-commit hook)
+#   1. ruff F821     - undefined Python names. Run isolated so a repo ruff.toml
+#                      that `extend`s a VPS-local path can't break CI.
 #   2. py_compile    - syntax validation on all .py files
-#   3. JS validation - node --check on inline <script> tags in static/*.html
+#   3. JS validation - node --check on inline <script> JS in static/*.html
+#                      (skips application/* blocks e.g. JSON-LD / ld+json)
 # Soft (informational): pytest tests/ - may need VPS-only config/services.
 # Do NOT expand ruff rules beyond F821. Do NOT chase style issues.
 
@@ -27,8 +29,8 @@ jobs:
           node-version: "22"
       - name: Install ruff
         run: pip install ruff
-      - name: Ruff lint (undefined names only)
-        run: ruff check --select F821 .
+      - name: Ruff lint (undefined names only, isolated from repo config)
+        run: ruff check --isolated --select F821 .
       - name: Syntax check Python files
         run: |
           find . -name '*.py' -not -path './.venv/*' -not -path './venv/*' -not -path './.git/*' | while read f; do
@@ -56,7 +58,8 @@ jobs:
             python3 -c "
           import re
           html = open('$f').read()
-          scripts = re.findall(r'<script(?![^>]*src=)[^>]*>(.*?)</script>', html, re.DOTALL)
+          # Skip src= (external) and application/* types (JSON-LD etc.) - only real inline JS.
+          scripts = re.findall(r'<script(?![^>]*src=)(?![^>]*application/)[^>]*>(.*?)</script>', html, re.DOTALL)
           for i, s in enumerate(scripts):
               if s.strip():
                   open(f'/tmp/check_{i}.js','w').write(s)
